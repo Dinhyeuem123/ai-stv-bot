@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+bot_config.json
+vm_bot_data/
+*.log
+.env
+.venv/
+.venv*/
+

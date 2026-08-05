@@ -1,0 +1,4 @@
+discord.py>=2.3.2
+aiohttp>=3.9.0
+certifi
+PyNaCl>=1.5.0
