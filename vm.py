@@ -77,7 +77,7 @@ GITHUB_RETRY_MAX: int = 5
 GITHUB_RETRY_BASE_SEC: float = 1.5
 MAX_ERROR_NOTIFY_CHARS: int = 1500
 EXPIRY_WARNING_CHANNEL_NAME: str = "virtual-machine-notification"
-SEVER_WINDOWS_CHANNEL_NAME: str = "sever-windows"
+VPS_EXPIRY_WARNING_CHANNEL_NAME: str = "vps-announcement"
 MIN_PANEL_INTERVAL_SEC: float = 15.0
 RATE_LIMIT_BACKOFF_SEC: int = 300
 RATE_LIMIT_WARN_THRESHOLD: int = 150
@@ -1566,11 +1566,16 @@ def build_status_embed(
 
 def build_vm_info_embed(vm: VMRecord, title_suffix: str = "", lang: str = "vi") -> discord.Embed:
     embed = discord.Embed(
-        title=_t(lang, f" {BRAND_NAME} — VM Info{title_suffix}", f" {BRAND_NAME} — Thông tin máy{title_suffix}"),
-        description=_t(lang, "**Keep secret** — sent privately.", "**Giữ bí mật** — gửi riêng cho bạn."),
+        title=_t(lang, f"🖥️ {BRAND_NAME} — Your Windows VM Is Ready{title_suffix}", f"🖥️ {BRAND_NAME} — Máy ảo Windows đã sẵn sàng{title_suffix}"),
+        description=_t(lang,
+            "Your temporary Windows VM is up and running.\n"
+            "The credentials below are **private — do not share them** with anyone.",
+            "Máy ảo Windows tạm thời của bạn đã chạy.\n"
+            "Thông tin đăng nhập bên dưới là **riêng tư — tuyệt đối không chia sẻ** cho bất kỳ ai."),
         color=0x5865F2,
         timestamp=datetime.now(VN_TZ),
     )
+    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/882/882756.png")
     instances = vm.instances or []
     if not instances and vm.password:
         instances = [{"hostname": TAILSCALE_HOSTNAME, "ip": vm.ip or "pending", "username": vm.username, "password": vm.password}]
@@ -1583,20 +1588,31 @@ def build_vm_info_embed(vm: VMRecord, title_suffix: str = "", lang: str = "vi") 
         if "\\" in str(login):
             login = str(login).split("\\")[-1]
         embed.add_field(
-            name=_t(lang, f"Machine {i} — {name}", f"Máy {i} — {name}"),
+            name=_t(lang, f"💻 Machine {i} — {name}", f"💻 Máy {i} — {name}"),
             value=_t(lang,
-                f"**IP:** `{ip_show}`\n**Account:** `{login}`\n**Password:** ||`{inst.get('password', '-')}`||\n*Connect via Remote Desktop (RDP)*",
-                f"**IP:** `{ip_show}`\n**Tài khoản:** `{login}`\n**Mật khẩu:** ||`{inst.get('password', '-')}`||\n*Kết nối qua Remote Desktop (RDP)*",
-            ),
+                f"`📌 IP:` **{ip_show}**\n"
+                f"`👤 Account:` **{login}**\n"
+                f"`🔑 Password:` ||`{inst.get('password', '-')}`||\n"
+                f"↳ Connect via **Remote Desktop (RDP)**",
+                f"`📌 IP:` **{ip_show}**\n"
+                f"`👤 Tài khoản:` **{login}**\n"
+                f"`🔑 Mật khẩu:` ||`{inst.get('password', '-')}`||\n"
+                f"↳ Kết nối bằng **Remote Desktop (RDP)**"),
             inline=False,
         )
         clip = str(inst.get("clip_url") or "").strip()
         if clip:
             embed.add_field(
                 name=_t(lang, "🎬 Experience Clip (Driveway)", "🎬 Link Clip Trải Nghiệm"),
-                value=f"[Xem clip tại đây]({clip})",
+                value=f"[▶️ Xem clip trải nghiệm tại đây]({clip})",
                 inline=False,
             )
+    exp = _parse_iso(vm.expires_at)
+    embed.add_field(
+        name=_t(lang, "⏳ Session Expires", "⏳ Phiên hết hạn"),
+        value=f"<t:{int(exp.timestamp())}:R>" if exp else _fmt_dt(vm.expires_at, lang=lang),
+        inline=True,
+    )
     embed.add_field(name=_t(lang, "Project", "Dự án"), value=f"`{vm.repo}`", inline=True)
     ts_key = ADMIN_TAILSCALE_KEY or "N/A"
     embed.add_field(
@@ -1614,11 +1630,12 @@ def build_vm_info_embed(vm: VMRecord, title_suffix: str = "", lang: str = "vi") 
             "**Bước B:** Mở Tailscale → Settings → Account → ⋮ → Use an Auth Key\n"
             "**Bước C:** Dán key bên dưới và kết nối.\n\n"
             "Sau khi kết nối, dùng IP và mật khẩu ở trên để RDP vào VM.\n"
-            "**🔑 Auth Key:** ||`" + ts_key + "`||",
-        ),
+            "**🔑 Auth Key:** ||`" + ts_key + "`||"),
         inline=False,
     )
-    embed.set_footer(text=_t(lang, f"{BRAND_NAME} VM Bot", f"{BRAND_NAME} VM Bot"))
+    embed.set_footer(text=_t(lang,
+        f"{BRAND_NAME} · Keep your credentials safe · {_fmt_duration(vm.duration_minutes, lang='en')} session",
+        f"{BRAND_NAME} · Hãy giữ thông tin đăng nhập an toàn · Phiên {_fmt_duration(vm.duration_minutes)}"))
     return embed
 
 def build_vps_status_embed(
@@ -1721,51 +1738,59 @@ def build_vps_status_embed(
 
 def build_vps_info_embed(vm: VMRecord, title_suffix: str = "", lang: str = "vi") -> discord.Embed:
     embed = discord.Embed(
-        title=_t(lang, f" {BRAND_NAME} — Ubuntu VPS Info{title_suffix}", f" {BRAND_NAME} — Thông tin Ubuntu VPS{title_suffix}"),
-        description=_t(lang, "**Keep secret** — sent privately.", "**Giữ bí mật** — gửi riêng cho bạn."),
+        title=_t(lang, f"🖥️ {BRAND_NAME} — Your Ubuntu VPS Is Ready{title_suffix}", f"🖥️ {BRAND_NAME} — VPS Ubuntu đã sẵn sàng{title_suffix}"),
+        description=_t(lang,
+            "Your temporary Ubuntu VPS is up and running.\n"
+            "Open the terminal link below to start working immediately.",
+            "VPS Ubuntu tạm thời của bạn đã chạy.\n"
+            "Mở link terminal bên dưới để bắt đầu làm việc ngay."),
         color=0x2ECC71,
         timestamp=datetime.now(VN_TZ),
     )
+    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/919/919837.png")
     instances = vm.instances or []
     for i, inst in enumerate(instances, 1):
         url = inst.get("sshx_url")
         if not url:
             continue
         embed.add_field(
-            name=_t(lang, f"VPS {i} — Interactive Terminal", f"VPS {i} — Terminal tương tác"),
+            name=_t(lang, f"💻 VPS {i} — Interactive Terminal", f"💻 VPS {i} — Terminal tương tác"),
             value=_t(lang,
-                f"**Link:** {url}\n"
-                f"**User:** `AISTV`\n\n"
-                "*Open the link in your browser and click **+** to open a terminal.*\n"
-                "The terminal runs on **Ubuntu LTS** with root access (`sudo`).",
-                f"**Link:** {url}\n"
-                f"**User:** `AISTV`\n\n"
-                "*Mở link trong trình duyệt và bấm **+** để mở terminal.*\n"
-                "Terminal chạy trên **Ubuntu LTS** với quyền root (`sudo`)."),
+                f"`🔗 Link:` **{url}**\n"
+                f"`👤 User:` **AISTV** (root · sudo)\n\n"
+                "↳ Open the link in your browser and click **+** to open a terminal.",
+                f"`🔗 Link:` **{url}**\n"
+                f"`👤 Người dùng:` **AISTV** (root · sudo)\n\n"
+                "↳ Mở link trong trình duyệt và bấm **+** để mở terminal."),
             inline=False,
         )
         clip = str(inst.get("clip_url") or "").strip()
         if clip:
             embed.add_field(
                 name=_t(lang, "🎬 Experience Clip (Driveway)", "🎬 Link Clip Trải Nghiệm"),
-                value=f"[Xem clip tại đây]({clip})",
+                value=f"[▶️ Xem clip trải nghiệm tại đây]({clip})",
                 inline=False,
             )
     embed.add_field(
-        name=_t(lang, "System Specs", "Thông số hệ thống"),
+        name=_t(lang, "⚙️ System Specs", "⚙️ Thông số hệ thống"),
         value=(
             "**OS:** `Ubuntu LTS x86_64`\n"
-            "**Host:** `Virtual Machine (Hyper-V)`\n"
             "**CPU:** `Intel Xeon Platinum 8573C (4)`\n"
             "**RAM:** `≈ 16 GB`\n"
             "**Shell:** `bash 5.2` · **Terminal:** `sshx`"
         ),
         inline=False,
     )
+    exp = _parse_iso(vm.expires_at)
+    embed.add_field(
+        name=_t(lang, "⏳ Session Expires", "⏳ Phiên hết hạn"),
+        value=f"<t:{int(exp.timestamp())}:R>" if exp else _fmt_dt(vm.expires_at, lang=lang),
+        inline=True,
+    )
     embed.add_field(name=_t(lang, "Project", "Dự án"), value=f"`{vm.repo}`", inline=True)
-    embed.add_field(name=_t(lang, "Duration", "Thời gian"), value=_fmt_duration(vm.duration_minutes, lang=lang), inline=True)
-    embed.add_field(name=_t(lang, "Expires", "Hết hạn"), value=_fmt_dt(vm.expires_at, lang=lang), inline=True)
-    embed.set_footer(text=_t(lang, f"{BRAND_NAME} VM Bot", f"{BRAND_NAME} VM Bot"))
+    embed.set_footer(text=_t(lang,
+        f"{BRAND_NAME} · Session auto-removes when time runs out · {_fmt_duration(vm.duration_minutes, lang='en')} session",
+        f"{BRAND_NAME} · Phiên tự động dọn dẹp khi hết thời gian · Phiên {_fmt_duration(vm.duration_minutes)}"))
     return embed
 
 def build_welcome_embed(guild: Optional[discord.Guild], lang: str = "vi") -> discord.Embed:
@@ -1872,11 +1897,17 @@ class CreateWizardView(discord.ui.View):
 
         existing = await self.bot.data.get_vm(user_id, kind="windows")
         if existing and _vm_is_active(existing):
-            await interaction.response.defer(ephemeral=True)
-            await self.bot.stop_vm(existing)
-            await self.bot.data.delete_vm(user_id, kind="windows")
-        else:
-            await interaction.response.defer(thinking=True)
+            try:
+                await interaction.response.send_message(
+                    _t(lang,
+                       " You already have an **active VM**. Stop your current VM or wait until it expires before creating a new one.",
+                       " Bạn đang có **1 máy ảo đang chạy**. Hãy dừng máy hiện tại hoặc đợi hết hạn rồi mới tạo được máy mới."),
+                    ephemeral=True,
+                )
+            except (discord.NotFound, discord.InteractionResponded):
+                pass
+            return
+        await interaction.response.defer(thinking=True)
 
         repo = WORKFLOW_REPO
         item = {
@@ -1968,11 +1999,17 @@ class CreateVPSWizardView(discord.ui.View):
 
         existing = await self.bot.data.get_vm(user_id, kind="vps")
         if existing and _vm_is_active(existing):
-            await interaction.response.defer(ephemeral=True)
-            await self.bot.stop_vm(existing)
-            await self.bot.data.delete_vm(user_id, kind="vps")
-        else:
-            await interaction.response.defer(thinking=True)
+            try:
+                await interaction.response.send_message(
+                    _t(lang,
+                       " You already have an **active VPS**. Stop your current VPS or wait until it expires before creating a new one.",
+                       " Bạn đang có **1 VPS đang chạy**. Hãy dừng VPS hiện tại hoặc đợi hết hạn rồi mới tạo được VPS mới."),
+                    ephemeral=True,
+                )
+            except (discord.NotFound, discord.InteractionResponded):
+                pass
+            return
+        await interaction.response.defer(thinking=True)
 
         repo = WORKFLOW_REPO
         item = {
@@ -2013,14 +2050,9 @@ class VMPanelView(discord.ui.View):
             label=_t(lang, "Stop VM", "Dừng VM"),
             style=discord.ButtonStyle.secondary, emoji="\U0001F6D1", custom_id="vm:stop", row=0,
         )
-        b_del = discord.ui.Button(
-            label=_t(lang, "Delete VM", "Xóa VM"),
-            style=discord.ButtonStyle.danger, emoji="\U0001F5D1", custom_id="vm:delete", row=1,
-        )
         for _btn, _cb in (
             (b_create, self.btn_create),
             (b_stop, self.btn_stop),
-            (b_del, self.btn_delete),
         ):
             async def _handler(interaction: discord.Interaction, _btn=_btn, _cb=_cb):
                 await _cb(interaction, _btn)
@@ -2087,21 +2119,13 @@ class VMPanelView(discord.ui.View):
         existing = await self.bot.data.get_vm(user_id, kind="windows")
         if existing and _vm_is_active(existing):
             try:
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.send_message(
+                    _t(lang,
+                        " You already have an **active VM**.\nStop your current VM or wait until it expires before creating a new one.",
+                        " Bạn đang có **1 máy ảo đang chạy**.\nHãy **dừng máy** hoặc **đợi hết hạn** rồi mới tạo được máy mới."),
+                    ephemeral=True,
+                )
             except (discord.NotFound, discord.InteractionResponded):
-                return
-            await self.bot.stop_vm(existing)
-            await self.bot.data.delete_vm(user_id, kind="windows")
-            embed = discord.Embed(
-                title=_t(lang, f" {BRAND_NAME} — VM Configuration", f" {BRAND_NAME} — Cấu hình VM"),
-                description=_t(lang,
-                    "Choose duration and Windows version below.",
-                    "Chọn thời gian và phiên bản Windows bên dưới."),
-                color=0x2ECC71,
-            )
-            try:
-                await interaction.followup.send(embed=embed, view=CreateWizardView(self.bot, lang=lang), ephemeral=True)
-            except discord.HTTPException:
                 pass
             return
 
@@ -2123,22 +2147,10 @@ class VMPanelView(discord.ui.View):
             return
         await interaction.response.defer(thinking=True)
         try:
-            msg = await self.bot.stop_vm(vm, lang=lang)
+            msg = await self.bot.stop_vm(vm, lang=await _get_lang(interaction.user.id, self.bot.data))
             await interaction.followup.send(msg)
         except Exception as e:
             await interaction.followup.send(f" Error: {_safe_error_text(e)}")
-
-    async def btn_delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        vm = await self.bot.data.get_vm(interaction.user.id, kind="windows")
-        if not await self._owner_check(interaction, vm, action="Delete"):
-            return
-        await interaction.response.defer(thinking=True)
-        try:
-            msg = await self.bot.delete_vm(vm, lang=await _get_lang(interaction.user.id, self.bot.data))
-            await interaction.followup.send(msg)
-        except Exception as e:
-            await self.bot.data.delete_vm(interaction.user.id, kind="windows")
-            await interaction.followup.send(f" Deleted record. Error: {_safe_error_text(e)}")
 
 class VPSPanelView(discord.ui.View):
     def __init__(self, bot: "VMBot", *, lang: str = "vi"):
@@ -2222,21 +2234,13 @@ class VPSPanelView(discord.ui.View):
         existing = await self.bot.data.get_vm(user_id, kind="vps")
         if existing and _vm_is_active(existing):
             try:
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.send_message(
+                    _t(lang,
+                        " You already have an **active VPS**.\nStop your current VPS or wait until it expires before creating a new one.",
+                        " Bạn đang có **1 VPS đang chạy**.\nHãy **dừng VPS** hoặc **đợi hết hạn** rồi mới tạo được VPS mới."),
+                    ephemeral=True,
+                )
             except (discord.NotFound, discord.InteractionResponded):
-                return
-            await self.bot.stop_vm(existing)
-            await self.bot.data.delete_vm(user_id, kind="vps")
-            embed = discord.Embed(
-                title=_t(lang, f" {BRAND_NAME} — VPS Configuration", f" {BRAND_NAME} — Cấu hình VPS"),
-                description=_t(lang,
-                    "Choose duration below.",
-                    "Chọn thời gian chạy bên dưới."),
-                color=0x2ECC71,
-            )
-            try:
-                await interaction.followup.send(embed=embed, view=CreateVPSWizardView(self.bot, lang=lang), ephemeral=True)
-            except discord.HTTPException:
                 pass
             return
 
@@ -2948,26 +2952,45 @@ class VMBot(commands.Bot):
         return False
 
     async def _notify_expiry(self, vm: VMRecord) -> None:
+        lang = await self.data.get_user_lang(vm.discord_id)
+        mins = vm.duration_minutes
+        exp_txt = _fmt_dt(vm.expires_at, lang=lang) if vm.expires_at else _fmt_duration(mins)
+        cmd_hint = "/vps" if vm.kind == "vps" else "/vm"
+        machine_en = "VPS" if vm.kind == "vps" else "Virtual machine"
+        machine_vi = "VPS" if vm.kind == "vps" else "máy ảo"
+        label_en = f"🪫 {machine_en} session ended" if vm.kind == "vps" else f"⏳ {machine_en} session ended"
+        label_vi = f"🪫 Phiên {machine_vi} đã kết thúc" if vm.kind == "vps" else f"⏳ Phiên {machine_vi} đã kết thúc"
+        embed = discord.Embed(
+            title=_t(lang, label_en, label_vi),
+            description=_t(lang,
+                f"Session duration: **{_fmt_duration(mins, lang='en')}**\n"
+                f"⏰ Expired at: **{exp_txt}**\n\n"
+                "The machine has been cleaned up from the system. "
+                f"Use `{cmd_hint}` to create a new session whenever you need it.",
+                f"Thời lượng phiên: **{_fmt_duration(mins)}**\n"
+                f"⏰ Hết hạn lúc: **{exp_txt}**\n\n"
+                "Máy đã được dọn dẹp khỏi hệ thống. "
+                f"Dùng `{cmd_hint}` để tạo phiên mới bất cứ khi nào bạn cần."),
+            color=0xE74C3C,
+            timestamp=datetime.now(VN_TZ),
+        )
+        embed.set_footer(text=_t(lang, f"{BRAND_NAME} · Session cleaned up", f"{BRAND_NAME} · Phiên đã được dọn dẹp"))
         user = self.get_user(vm.discord_id) or await self.fetch_user(vm.discord_id)
-        if not user:
-            return
         try:
-            lang = await self.data.get_user_lang(vm.discord_id)
-            mins = vm.duration_minutes
-            run_hint = f" (run `{vm.run_id}`)" if vm.run_id else ""
-            exp_txt = _fmt_dt(vm.expires_at, lang=lang) if vm.expires_at else _fmt_duration(mins)
-            cmd_hint = "/vm" if vm.kind != "vps" else "/vps"
-            machine_word = "VPS" if vm.kind == "vps" else "Virtual machine"
-            machine_vi = "VPS" if vm.kind == "vps" else "máy ảo"
-            await user.send(_t(lang,
-                f"⌛ **{machine_word} session ended**\n"
-                f"Duration: **{_fmt_duration(mins)}** · Expired: **{exp_txt}**{run_hint}\n\n"
-                f"The machine has been removed from the system. Use `{cmd_hint}` to create a new session if needed.",
-                f"⌛ **Phiên {machine_vi} đã kết thúc**\n"
-                f"Thời hạn: **{_fmt_duration(mins)}** · Hết lúc: **{exp_txt}**{run_hint}\n\n"
-                f"Máy đã được gỡ khỏi hệ thống. Dùng `{cmd_hint}` để tạo phiên mới nếu cần.",
-            ))
+            if user:
+                await user.send(embed=embed)
         except discord.HTTPException:
+            pass
+        try:
+            channel = await self.get_expiry_warning_channel(vm)
+            if channel:
+                await channel.send(
+                    content=_t(lang,
+                        f"⏳ <@{vm.discord_id}> — your {machine_en.lower()} session has ended.",
+                        f"⏳ <@{vm.discord_id}> — phiên {machine_vi} của bạn đã kết thúc."),
+                    embed=embed,
+                )
+        except (discord.HTTPException, Exception):
             pass
 
     async def _notify_expiry_warning(self, vm: VMRecord, minutes_left: int = 5) -> None:
@@ -2996,22 +3019,20 @@ class VMBot(commands.Bot):
 
 
     async def get_expiry_warning_channel(self, vm: VMRecord) -> Optional[discord.abc.Messageable]:
+        primary_name = VPS_EXPIRY_WARNING_CHANNEL_NAME if vm.kind == "vps" else EXPIRY_WARNING_CHANNEL_NAME
+        candidate_names = [primary_name, EXPIRY_WARNING_CHANNEL_NAME, VPS_EXPIRY_WARNING_CHANNEL_NAME]
         if vm.guild_id:
             guild = self.get_guild(vm.guild_id)
             if guild:
-                channel = _find_channel_by_name(guild, EXPIRY_WARNING_CHANNEL_NAME)
-                if channel:
-                    return channel
-                channel = _find_channel_by_name(guild, SEVER_WINDOWS_CHANNEL_NAME)
-                if channel:
-                    return channel
+                for name in candidate_names:
+                    channel = _find_channel_by_name(guild, name)
+                    if channel:
+                        return channel
         for guild in self.guilds:
-            channel = _find_channel_by_name(guild, EXPIRY_WARNING_CHANNEL_NAME)
-            if channel:
-                return channel
-            channel = _find_channel_by_name(guild, SEVER_WINDOWS_CHANNEL_NAME)
-            if channel:
-                return channel
+            for name in candidate_names:
+                channel = _find_channel_by_name(guild, name)
+                if channel:
+                    return channel
         if vm.channel_id:
             try:
                 channel = self.get_channel(vm.channel_id) or await self.fetch_channel(vm.channel_id)
