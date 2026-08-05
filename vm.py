@@ -83,7 +83,7 @@ RATE_LIMIT_BACKOFF_SEC: int = 300
 RATE_LIMIT_WARN_THRESHOLD: int = 150
 GITHUB_USER_AGENT: str = "AISTV-VM-Bot/1.0"
 # Bump khi sửa workflow/script -> bot tự đẩy lại file mới vào repo worker khi khởi động
-WORKFLOW_VERSION: int = 6
+WORKFLOW_VERSION: int = 7
 # Scheduler local chạy mỗi 30s để xử lý hết hạn/cảnh báo — KHÔNG gọi GitHub API (webhook event-driven)
 SCHEDULER_INTERVAL_SEC: float = 30.0
 # Nếu máy đang "starting" quá lâu mà webhook không bao giờ đến -> báo fail (an toàn lưới)
@@ -500,7 +500,7 @@ ssh_url = os.environ.get("SSHX_LINK", "").strip()
 payload = {
     "content": mention,
     "embeds": [{
-        "title": "🚀 MÁY ẢO / VPS ĐÃ KHỞI TẠO THÀNH CÔNG!",
+        "title": "✅ Phiên đã sẵn sàng",
         "color": 0x2ECC71,
         "fields": [
             {"name": "🌐 Link Terminal (sshx)", "value": f"{ssh_url}", "inline": False},
@@ -594,7 +594,7 @@ if __name__ == "__main__":
 """
 
 def _notify_discord_script() -> str:
-    """Gửi embed '🚀 MÁY ẢO / VPS ĐÃ KHỞI TẠO THÀNH CÔNG!' thẳng về Discord từ workflow."""
+    """Gửi embed '✅ Phiên đã sẵn sàng' thẳng về Discord từ workflow."""
     return r"""#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Post rich Discord embed (MAY AO / VPS DA KHOI TAO THANH CONG) qua DISCORD_WEBHOOK_URL.
@@ -622,7 +622,7 @@ def main() -> int:
     payload = {
         "content": "<@%s>" % uid if uid else "",
         "embeds": [{
-            "title": "🚀 MÁY ẢO / VPS ĐÃ KHỞI TẠO THÀNH CÔNG!",
+"title": "✅ Phiên đã sẵn sàng",
             "color": 0x2ECC71,
             "fields": fields,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -665,7 +665,7 @@ jobs:
   aistv-vm:
     strategy:
       fail-fast: false
-      max-parallel: 10
+      max-parallel: 4
       matrix:
         include: ${{ github.event.client_payload.matrix }}
     runs-on: ${{ matrix.runner }}
@@ -696,13 +696,6 @@ jobs:
           DISCORD_ID: ${{ github.event.client_payload.session }}
         run: |
           & ./scripts/provision.ps1
-      - name: Upload VM credentials
-        uses: actions/upload-artifact@v4
-        with:
-          name: aistv-creds-${{ matrix.instance_id }}
-          path: vm-creds.json
-          if-no-files-found: warn
-          retention-days: 1
       - name: Upload clip to Driveway (optional, pluggable)
         id: upload_clip
         if: always()
@@ -743,7 +736,7 @@ jobs:
           CLIP_URL: ${{ steps.upload_clip.outputs.clip_url }}
         run: |
           python scripts/notify_vm_ready.py || echo "Bot webhook notify failed"
-      - name: Notify Discord — MÁY ẢO / VPS ĐÃ KHỞI TẠO THÀNH CÔNG
+      - name: Notify Discord — Session ready
         if: always()
         shell: bash
         env:
@@ -795,13 +788,6 @@ jobs:
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
           bash scripts/vps.sh
-      - name: Upload SSH URL
-        uses: actions/upload-artifact@v4
-        with:
-          name: aistv-ssh-${{ matrix.instance_id }}
-          path: ssh_url.txt
-          if-no-files-found: warn
-          retention-days: 1
 """
     return (yaml_template
         .replace("%BRAND_NAME%", BRAND_NAME)
@@ -2581,7 +2567,7 @@ class VMBot(commands.Bot):
                     raise
             await gh.enable_actions(ADMIN_GITHUB_TOKEN, owner, repo)
         else:
-            await gh.create_repo(ADMIN_GITHUB_TOKEN, repo, private=False)
+            await gh.create_repo(ADMIN_GITHUB_TOKEN, repo, private=True)
             await asyncio.sleep(2)
             await gh.enable_actions(ADMIN_GITHUB_TOKEN, owner, repo)
 
