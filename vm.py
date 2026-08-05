@@ -2678,6 +2678,15 @@ class VMBot(commands.Bot):
         except Exception as e:
             log.warning("Fixed worker repo setup failed (sẽ thử lại khi tạo máy): %s", e)
         self.scheduler.start()
+        # Quét 1 lần lúc khởi động: làm mới mọi panel cũ bằng view mới (VD: đã bỏ nút Delete VM)
+        try:
+            for vm in await self.data.all_vms():
+                try:
+                    await self._refresh_panel(vm)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         self.add_view(VMPanelView(self))
         self.add_view(VPSPanelView(self))
         await self.tree.sync()
