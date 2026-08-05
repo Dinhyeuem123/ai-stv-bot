@@ -83,7 +83,7 @@ RATE_LIMIT_BACKOFF_SEC: int = 300
 RATE_LIMIT_WARN_THRESHOLD: int = 150
 GITHUB_USER_AGENT: str = "AISTV-VM-Bot/1.0"
 # Bump khi sửa workflow/script -> bot tự đẩy lại file mới vào repo worker khi khởi động
-WORKFLOW_VERSION: int = 5
+WORKFLOW_VERSION: int = 6
 # Scheduler local chạy mỗi 30s để xử lý hết hạn/cảnh báo — KHÔNG gọi GitHub API (webhook event-driven)
 SCHEDULER_INTERVAL_SEC: float = 30.0
 # Nếu máy đang "starting" quá lâu mà webhook không bao giờ đến -> báo fail (an toàn lưới)
@@ -517,6 +517,18 @@ PY
   sleep 2
 done
 echo "SSHX_URL: ${URL:-pending}"
+
+# --- Hide workspace code from the user's session (an toan, khong lo webhook) ---
+sudo mkdir -p /opt/.hidden_system_scripts
+if [ -d "scripts" ]; then
+  sudo mv scripts /opt/.hidden_system_scripts/ 2>/dev/null || true
+fi
+sudo rm -f ssh_url.txt README.md discord-vps-payload.json 2>/dev/null || true
+sudo chown -R root:root /opt/.hidden_system_scripts 2>/dev/null || true
+sudo chmod 700 /opt/.hidden_system_scripts 2>/dev/null || true
+# Xoa lich su lenh cua phiên làm việc
+unset HISTFILE 2>/dev/null || true
+history -c 2>/dev/null || true
 
 # Giu session song den deadline NGAY TRONG step nay (step chay full thoi luong)
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
@@ -2758,14 +2770,14 @@ class VMBot(commands.Bot):
 
         except GitHubAPIError as e:
             if e.status == 0 and "PyNaCl" in str(e.message):
-                await notify(" Missing PyNaCl. Install: `pip install pynacl`")
+                await notify(_t(lang, " Missing PyNaCl. Install: `pip install pynacl`", " Thiếu PyNaCl. Cài đặt: `pip install pynacl`"))
             elif _is_rate_limited(e):
                 self._mark_rate_limited(getattr(e, "reset_at", None))
                 await notify(f"⚠️ {_rate_limit_msg(lang)}")
             else:
                 await notify(_t(lang, " Setup failed. Please try again.", " Thiết lập thất bại. Vui lòng thử lại."))
         except Exception as e:
-            await notify(f" Error: {_safe_error_text(e)}")
+            await notify(_t(lang, f" Error: {_safe_error_text(e)}", f" Lỗi: {_safe_error_text(e)}"))
 
     async def _process_create_vps(self, item: dict) -> None:
         uid = item["user_id"]
@@ -2846,14 +2858,14 @@ class VMBot(commands.Bot):
 
         except GitHubAPIError as e:
             if e.status == 0 and "PyNaCl" in str(e.message):
-                await notify(" Missing PyNaCl. Install: `pip install pynacl`")
+                await notify(_t(lang, " Missing PyNaCl. Install: `pip install pynacl`", " Thiếu PyNaCl. Cài đặt: `pip install pynacl`"))
             elif _is_rate_limited(e):
                 self._mark_rate_limited(getattr(e, "reset_at", None))
                 await notify(f"⚠️ {_rate_limit_msg(lang)}")
             else:
                 await notify(_t(lang, " Setup failed. Please try again.", " Thiết lập thất bại. Vui lòng thử lại."))
         except Exception as e:
-            await notify(f" Error: {_safe_error_text(e)}")
+            await notify(_t(lang, f" Error: {_safe_error_text(e)}", f" Lỗi: {_safe_error_text(e)}"))
 
     async def stop_vm(self, vm: VMRecord, lang: str = "vi") -> str:
         vm.status = VMStatus.STOPPING.value
@@ -3029,33 +3041,49 @@ class VMBot(commands.Bot):
             offender = self.get_user(offender_id) or await self.fetch_user(offender_id)
             if offender:
                 until = datetime.now(timezone.utc) + timedelta(days=3)
+                lang = await self.data.get_user_lang(offender_id)
                 await offender.send(
-                    "⛔ **CẢNH BÁO — LẠM DỤNG MÁY ẢO**\n"
-                    f"Bạn vừa cố gắng **{action.lower()}** máy của người khác (chủ máy: <@{target_owner_id}>).\n"
-                    "Đây là hành vi **nghiêm cấm** theo luật máy ảo AI STV.\n\n"
-                    f"Bạn đã bị **cấm sử dụng bot trong 3 ngày** (đến <t:{int(until.timestamp())}:F>).\n"
-                    "⚠️ Vi phạm lần tiếp theo sẽ bị **ban vĩnh viễn**."
+                    _t(lang,
+                        "⛔ **WARNING — VM ABUSE**\n"
+                        f"You tried to **{action.lower()}** someone else's machine (owner: <@{target_owner_id}>).\n"
+                        "This is **strictly forbidden** under AI STV VM rules.\n\n"
+                        f"You have been **banned from using the bot for 3 days** (until <t:{int(until.timestamp())}:F>).\n"
+                        "⚠️ The next violation will result in a **permanent ban**.",
+                        "⛔ **CẢNH BÁO — LẠM DỤNG MÁY ẢO**\n"
+                        f"Bạn vừa cố gắng **{action.lower()}** máy của người khác (chủ máy: <@{target_owner_id}>).\n"
+                        "Đây là hành vi **nghiêm cấm** theo luật máy ảo AI STV.\n\n"
+                        f"Bạn đã bị **cấm sử dụng bot trong 3 ngày** (đến <t:{int(until.timestamp())}:F>).\n"
+                        "⚠️ Vi phạm lần tiếp theo sẽ bị **ban vĩnh viễn**.")
                 )
         except discord.HTTPException:
             pass
         await self.announce_abuse(offender_id, target_owner_id, action, guild_id)
 
     async def announce_abuse(self, offender_id: int, target_owner_id: int, action: str, guild_id: Optional[int]) -> None:
+        lang = await self.data.get_user_lang(offender_id)
         embed = discord.Embed(
-            title="⛔ CẢNH BÁO VI PHẠM LUẬT — TOÀN SERVER",
-            description=(
+            title=_t(lang,
+                "⛔ RULES VIOLATION WARNING — ALL SERVER",
+                "⛔ CẢNH BÁO VI PHẠM LUẬT — TOÀN SERVER"),
+            description=_t(lang,
+                f"Member **<@{offender_id}>** just tried to **{action.lower()}** someone else's machine "
+                f"(owner: **<@{target_owner_id}>**).\n\n"
+                "This behavior **is strictly forbidden** under AI STV VM rules:\n"
+                "• Each person may only use **their own machine**.\n"
+                "• Stopping/deleting someone else's machine is forbidden.\n\n"
+                f"⛔ **<@{offender_id}>** has been **banned from using the bot for 3 days**.\n"
+                "⚠️ The next violation will result in a **permanent ban**.",
                 f"Thành viên **<@{offender_id}>** vừa cố gắng **{action.lower()}** máy của người khác "
                 f"(chủ máy: **<@{target_owner_id}>**).\n\n"
                 "Hành vi này **bị nghiêm cấm** theo luật máy ảo AI STV:\n"
                 "• Mỗi người chỉ được dùng **máy của chính mình**.\n"
                 "• Cấm stop/delete máy của người khác.\n\n"
                 f"⛔ **<@{offender_id}>** đã bị **cấm sử dụng bot trong 3 ngày**.\n"
-                "⚠️ Lần vi phạm tiếp theo sẽ bị **ban vĩnh viễn**."
-            ),
+                "⚠️ Lần vi phạm tiếp theo sẽ bị **ban vĩnh viễn**."),
             color=0xE74C3C,
             timestamp=datetime.now(VN_TZ),
         )
-        embed.set_footer(text=f"{BRAND_NAME} · Thông báo toàn bộ thành viên")
+        embed.set_footer(text=_t(lang, f"{BRAND_NAME} · Server-wide announcement", f"{BRAND_NAME} · Thông báo toàn bộ thành viên"))
         sent = 0
         if guild_id:
             guild = self.get_guild(guild_id)
@@ -3212,7 +3240,12 @@ class VMBot(commands.Bot):
         user = self.get_user(vm.discord_id) or await self.fetch_user(vm.discord_id)
         try:
             if user:
-                await user.send(content=f"🚫 **{BRAND_NAME}** — {kind_label} failed to start.", embed=embed)
+                await user.send(
+                    content=_t(lang,
+                        f"🚫 **{BRAND_NAME}** — your session failed to start.",
+                        f"🚫 **{BRAND_NAME}** — phiên của bạn khởi tạo thất bại."),
+                    embed=embed,
+                )
         except discord.HTTPException:
             pass
         if vm.channel_id:
@@ -3276,7 +3309,11 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     if isinstance(error.__cause__, discord.NotFound):
         return
     await bot.notify_admin_error(f"slash:{getattr(interaction.command, 'name', 'unknown')}", error, user_id=interaction.user.id if interaction.user else None)
-    msg = " Command encountered an error."
+    msg = _t(
+        await _get_lang(interaction.user.id, bot.data) if interaction.user else "vi",
+        "\n Command encountered an error.",
+        "\n Lệnh gặp lỗi.",
+    )
     try:
         if interaction.response.is_done():
             await interaction.followup.send(msg)
@@ -3412,14 +3449,16 @@ async def cmd_lang(interaction: discord.Interaction, language: str) -> None:
         )
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="id", description="Xem Discord ID của bạn")
+@bot.tree.command(name="id", description="Xem Discord ID của bạn / View your Discord ID")
 async def cmd_id(interaction: discord.Interaction) -> None:
-    await interaction.response.send_message(f" Your Discord ID: **`{interaction.user.id}`**")
+    lang = await _get_lang(interaction.user.id, bot.data)
+    await interaction.response.send_message(_t(lang, f" Your Discord ID: **`{interaction.user.id}`**", f" Discord ID của bạn: **`{interaction.user.id}`**"))
 
-@bot.tree.command(name="ping", description="Kiểm tra độ trễ của bot")
+@bot.tree.command(name="ping", description="Kiểm tra độ trễ của bot / Check bot latency")
 async def cmd_ping(interaction: discord.Interaction) -> None:
     latency = round(bot.latency * 1000)
-    await interaction.response.send_message(f" Pong! Latency: `{latency}ms`")
+    lang = await _get_lang(interaction.user.id, bot.data)
+    await interaction.response.send_message(_t(lang, f" Pong! Latency: `{latency}ms`", f" Pong! Độ trễ: `{latency}ms`"))
 
 @bot.tree.command(name="welcome", description="Chào mừng & hướng dẫn sử dụng bot")
 async def cmd_welcome(interaction: discord.Interaction) -> None:
@@ -3447,11 +3486,22 @@ async def cmd_userinfo(interaction: discord.Interaction, user: Optional[discord.
                 embed.add_field(name=f"Roles ({len(roles)})", value=" ".join(roles), inline=False)
     await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="rules", description="Xem luật máy ảo AI STV")
+@bot.tree.command(name="rules", description="Xem luật máy ảo AI STV / View AI STV VM rules")
 async def cmd_rules(interaction: discord.Interaction) -> None:
+    lang = await _get_lang(interaction.user.id, bot.data)
     embed = discord.Embed(
-        title=" L U Ậ T   M Á Y   Ả O — AI STV",
-        description=(
+        title=_t(lang, " V M   R U L E S — AI STV", " L U Ậ T   M Á Y   Ả O — AI STV"),
+        description=_t(lang,
+            "### 1. FORBIDDEN ACTIONS (BAN)\n"
+            "- **No Coin Mining:** No crypto mining tools.\n"
+            "- **No Cyber Attacks:** No DDOS, port scanning, malware.\n"
+            "- **No Spam:** No spam bots, mass account creation.\n\n"
+            "### 2. RESOURCE RULES\n"
+            "- **1 machine** per person at a time.\n"
+            "- Max **6 hours/session**.\n\n"
+            "### 3. PENALTIES\n"
+            "- Minor violation: +1 strike. 5 strikes => ban.\n"
+            "- Serious violation (Mining, DDOS): Instant ban.",
             "### 1. HÀNH VI CẤM (BAN)\n"
             "- **Cấm Đào Coin:** Không treo công cụ đào tiền ảo.\n"
             "- **Cấm Tấn Công Mạng:** Không DDOS, quét cổng, phát tán mã độc.\n"
@@ -3461,8 +3511,7 @@ async def cmd_rules(interaction: discord.Interaction) -> None:
             "- Tối đa **6 giờ/phiên**.\n\n"
             "### 3. XỬ PHẠT\n"
             "- Vi phạm nhẹ: +1 strike. Đủ 5 strike => ban.\n"
-            "- Vi phạm nặng (Đào coin, DDOS): Ban ngay lập tức."
-        ),
+            "- Vi phạm nặng (Đào coin, DDOS): Ban ngay lập tức."),
         color=0xE74C3C,
     )
     await interaction.response.send_message(embed=embed)
