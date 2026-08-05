@@ -2668,7 +2668,7 @@ class VMBot(commands.Bot):
         logging.getLogger("vm_bot").info("Slash commands synced")
 
     async def close(self) -> None:
-        self.scheduler.stop()
+        await self.scheduler.stop()
         if self.session:
             await self.session.close()
         await super().close()
