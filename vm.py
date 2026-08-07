@@ -365,7 +365,8 @@ if (Test-Path -LiteralPath $tsExe) {
   $ip = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 30).ip
 }
 # Password bo ky tu de nham lan (0/O, 1/l/I) de gõ/keo-tha dung 100%
-$password = -join (((48..57)+(65..90)+(97..122) | Where-Object { $_ -notin @(48,49,73,76,79,105,108,111) } | Get-Random -Count 20 | ForEach-Object { [char]$_ }))
+# NOTE: net.exe prompts for confirmation when password is longer than 14 chars.
+$password = -join (((48..57)+(65..90)+(97..122) | Where-Object { $_ -notin @(48,49,73,76,79,105,108,111) } | Get-Random -Count 14 | ForEach-Object { [char]$_ }))
 $vmUser = 'AISTV'
 # TAO USER BANG net.exe — on dinh tren moi image, khong phu thuoc module Microsoft.PowerShell.LocalAccounts
 # (tren windows-2025 / pwsh 7.x module nay loi: Import-Module loi + New-LocalUser/Set-LocalUser that bat)
