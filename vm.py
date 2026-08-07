@@ -83,7 +83,7 @@ RATE_LIMIT_BACKOFF_SEC: int = 300
 RATE_LIMIT_WARN_THRESHOLD: int = 150
 GITHUB_USER_AGENT: str = "AISTV-VM-Bot/1.0"
 # Bump khi sửa workflow/script -> bot tự đẩy lại file mới vào repo worker khi khởi động
-WORKFLOW_VERSION: int = 9
+WORKFLOW_VERSION: int = 10
 # Scheduler local chạy mỗi 30s để xử lý hết hạn/cảnh báo — KHÔNG gọi GitHub API (webhook event-driven)
 SCHEDULER_INTERVAL_SEC: float = 30.0
 # Nếu máy đang "starting" quá lâu mà webhook không bao giờ đến -> báo fail (an toàn lưới)
@@ -369,11 +369,12 @@ $password = -join (((48..57)+(65..90)+(97..122) | Where-Object { $_ -notin @(48,
 $vmUser = 'AISTV'
 # TAO USER BANG net.exe — on dinh tren moi image, khong phu thuoc module Microsoft.PowerShell.LocalAccounts
 # (tren windows-2025 / pwsh 7.x module nay loi: Import-Module loi + New-LocalUser/Set-LocalUser that bat)
+# LUU Y: net.exe hoi "Do you want to continue? (Y/N)" khi pass dai hon 14 ky tu -> phai gui Y qua stdin, neu khong fail exit -1
 & net.exe user $vmUser > $null 2>&1
 if ($LASTEXITCODE -eq 0) {
-  & net.exe user $vmUser $password /passwordchg:no /expires:never
+  "Y" | & net.exe user $vmUser $password /passwordchg:no /expires:never
 } else {
-  & net.exe user $vmUser $password /add /fullname:"AI STV User" /passwordchg:no /expires:never
+  "Y" | & net.exe user $vmUser $password /add /fullname:"AI STV User" /passwordchg:no /expires:never
 }
 if ($LASTEXITCODE -ne 0) {
   Write-Error "TAO USER $vmUser THAT BAI (net.exe exit $LASTEXITCODE) — khong gui creds, bao fail"
