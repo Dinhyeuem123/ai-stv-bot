@@ -83,7 +83,7 @@ RATE_LIMIT_BACKOFF_SEC: int = 300
 RATE_LIMIT_WARN_THRESHOLD: int = 150
 GITHUB_USER_AGENT: str = "AISTV-VM-Bot/1.0"
 # Bump khi sửa workflow/script -> bot tự đẩy lại file mới vào repo worker khi khởi động
-WORKFLOW_VERSION: int = 7
+WORKFLOW_VERSION: int = 8
 # Scheduler local chạy mỗi 30s để xử lý hết hạn/cảnh báo — KHÔNG gọi GitHub API (webhook event-driven)
 SCHEDULER_INTERVAL_SEC: float = 30.0
 # Nếu máy đang "starting" quá lâu mà webhook không bao giờ đến -> báo fail (an toàn lưới)
@@ -364,19 +364,41 @@ if (Test-Path -LiteralPath $tsExe) {
 } else {
   $ip = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 30).ip
 }
-$password = -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 52 | ForEach-Object { [char]$_ })
+# Password bo ky tu de nham lan (0/O, 1/l/I) de gõ/kéo-tha dung 100%
+$password = -join (((48..57)+(65..90)+(97..122) | Where-Object { $_ -notin @(48,49,73,76,79,105,108,111) } | Get-Random -Count 20 | ForEach-Object { [char]$_ }))
 $vmUser = 'AISTV'
 $sec = ConvertTo-SecureString $password -AsPlainText -Force
-if (Get-LocalUser -Name $vmUser -ErrorAction SilentlyContinue) {
-  Set-LocalUser -Name $vmUser -Password $sec -PasswordNeverExpires $true -ErrorAction SilentlyContinue
+# Fix pwsh 7.3+/image moi (VD windows-2025): module LocalAccounts loi autoload -> New-LocalUser/Set-LocalUser that bat tam -> user khong duoc tao nhung script van chay tiep
+Import-Module Microsoft.PowerShell.LocalAccounts -UseWindowsPowerShell -SkipEditionCheck -ErrorAction SilentlyContinue
+$userExists = $false
+try { $userExists = [bool](Get-LocalUser -Name $vmUser -ErrorAction SilentlyContinue) } catch { $userExists = $false }
+if ($userExists) {
+  Set-LocalUser -Name $vmUser -Password $sec -PasswordNeverExpires $true -ErrorAction Stop
 } else {
-  New-LocalUser -Name $vmUser -Password $sec -FullName 'AI STV User' -PasswordNeverExpires -ErrorAction SilentlyContinue
+  New-LocalUser -Name $vmUser -Password $sec -FullName 'AI STV User' -PasswordNeverExpires $true -AccountNeverExpires -ErrorAction Stop
 }
-$lu = Get-LocalUser -Name $vmUser -ErrorAction SilentlyContinue
-if ($lu) { $lu | Enable-LocalUser -ErrorAction SilentlyContinue }
+# Xoa co "phai doi mat khau khi dang nhap lan dau" (neu co) — neu con co nay RDP tu choi pass dung
+try {
+  $adsi = [ADSI]"WinNT://$env:COMPUTERNAME/$vmUser,User"
+  $adsi.PasswordExpired = 0
+  $adsi.SetInfo()
+} catch {}
+# BAT BUOC kiem tra user ton tai — neu that bat, fail ngay (khong gui pass ao cho user)
+$lu = $null
+try { $lu = Get-LocalUser -Name $vmUser -ErrorAction Stop } catch { $lu = $null }
+if (-not $lu) {
+  Write-Error "TAO USER $vmUser THAT BAI — khong gui creds, bao fail"
+  exit 1
+}
+$lu | Enable-LocalUser -ErrorAction SilentlyContinue
+& net.exe user $vmUser /active:yes 2>$null
 Add-LocalGroupMember -Group 'Administrators' -Member $vmUser -ErrorAction SilentlyContinue
 Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $vmUser -ErrorAction SilentlyContinue
+# net.exe nhu lop du phong (khong phu thuoc module LocalAccounts)
+& net.exe localgroup Administrators $vmUser /add 2>$null
+& net.exe localgroup "Remote Desktop Users" $vmUser /add 2>$null
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1
 Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' | Out-Null
 # Set up wallpaper & account picture
 $ws2 = if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } else { (Get-Location).Path }
